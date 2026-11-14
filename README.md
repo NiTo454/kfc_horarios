@@ -1,36 +1,38 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Turno — horarios semanales
 
-## Getting Started
+Aplicación Next.js con acceso por correo y contraseña. Los empleados consultan el horario más reciente de Supabase; el administrador carga un PDF, revisa los datos extraídos y confirma su publicación.
 
-First, run the development server:
+## Ejecutar localmente
 
 ```bash
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Abre [http://localhost:3000](http://localhost:3000). Las consultas requieren una sesión iniciada. Si todavía no hay una semana publicada, la aplicación mostrará un estado vacío.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Supabase
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+1. En Supabase, abre **SQL Editor**, copia [`supabase/schema.sql`](./supabase/schema.sql) y pulsa **Run**. Si ya ejecutaste una versión anterior, vuelve a ejecutarlo para agregar las columnas, permisos del servidor y la función de publicación.
+2. En **Authentication → Providers**, habilita Email. En **Authentication → URL Configuration**, configura `http://localhost:3000` y agrega el dominio de Vercel como URL de redirección.
+3. En **Storage**, crea o conserva el bucket `schedules` como **privado**.
+4. Copia las variables de [`.env.example`](./.env.example) a `.env.local` (o al `.env` local que ya use el proyecto). Obtén la URL y la clave publicable en **Project Settings → API Keys**. La clave secreta de servidor también está en esa sección; nunca la pongas en una variable `NEXT_PUBLIC_`, en el navegador ni en Git.
+5. En `SCHEDULE_ADMIN_EMAILS`, escribe el correo verificado de la cuenta que podrá publicar. Se pueden separar varios correos con comas. Reinicia `npm run dev` después de cambiar `.env`.
+6. Inicia sesión con esa cuenta, pulsa **Cargar horario PDF**, analiza el archivo y revisa la vista previa. Al confirmar, el PDF se sube al bucket privado y los empleados, turnos y descansos se publican en las tablas. Si ya existe la misma sucursal y fecha inicial, la pantalla avisa que se reemplazará.
 
-## Learn More
+La carga acepta PDFs de hasta 4 MB, con texto seleccionable, en el formato **Horario por trabajador** con periodo, fechas en columnas y códigos de turno. Si el PDF no coincide o no puede leerse, se muestra un error y no se publican datos. La extracción todavía no incluye OCR.
 
-To learn more about Next.js, take a look at the following resources:
+Las políticas RLS permiten leer horarios a usuarios autenticados para la búsqueda de compañeros. El esquema concede a `service_role` lectura en `schedules` para que el servidor pueda revisar si una semana ya existe; la escritura usa una función de base de datos invocable solo con la clave secreta de servidor. El endpoint también verifica la sesión y el correo administrador.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Vercel
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+En **Project → Settings → Environment Variables**, agrega las cuatro variables de [`.env.example`](./.env.example) a los entornos necesarios y vuelve a desplegar. Configura Node.js **22.13 o superior** para PDF.js. No subas `.env` al repositorio.
 
-## Deploy on Vercel
+## Pendiente
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+- Asociar cada cuenta autenticada con su persona de `employees`; por ahora, la selección de nombre se guarda en el navegador.
+- Permitir corregir celdas detectadas antes de confirmar y añadir OCR si llegan PDFs escaneados.
+- Añadir selector e historial de semanas. El panel actualmente muestra la última semana publicada.
+- Probar en producción el correo administrador, la clave secreta del servidor, el bucket privado y las redirecciones de autenticación.
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+La clave secreta de servidor nunca debe exponerse al cliente.
