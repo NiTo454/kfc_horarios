@@ -3,6 +3,16 @@ import type { NextConfig } from "next";
 const nextConfig: NextConfig = {
   /* config options here */
   serverExternalPackages: ["pdfjs-dist"],
+  outputFileTracingIncludes: {
+    "/api/schedules/preview": [
+      "./node_modules/pdfjs-dist/legacy/build/pdf.worker.mjs",
+      "./node_modules/pdfjs-dist/legacy/build/pdf.worker.min.mjs",
+    ],
+    "/api/schedules/publish": [
+      "./node_modules/pdfjs-dist/legacy/build/pdf.worker.mjs",
+      "./node_modules/pdfjs-dist/legacy/build/pdf.worker.min.mjs",
+    ],
+  },
   experimental: {
     agentFeedback: true,
   },
