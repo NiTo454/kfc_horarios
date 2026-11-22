@@ -805,7 +805,7 @@ export default function Home() {
           </div>}
 
           {uploadMessage && <p className="upload-error" role="alert">{uploadMessage}</p>}
-          <p className="upload-admin-note">Solo la cuenta cuyo correo esté configurado como administrador puede publicar. El archivo y los turnos no se guardan si el análisis falla.</p>
+          <p className="upload-admin-note">Solo las cuentas con rol de administrador activo pueden publicar horarios. El archivo y los turnos no se guardan si el análisis falla.</p>
           <div className="modal-actions">
             <button type="button" className="cancel-button" disabled={uploading} onClick={closeUploader}>Cancelar</button>
             {!uploadPreview

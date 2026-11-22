@@ -8,16 +8,12 @@ export async function authorizeScheduleAdmin(request: Request): Promise<Authoriz
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const publishableKey = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
   const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  const adminEmails = process.env.SCHEDULE_ADMIN_EMAILS
-    ?.split(",")
-    .map((email) => email.trim().toLocaleLowerCase("en-US"))
-    .filter(Boolean) ?? [];
 
-  if (!url || !publishableKey || !serviceRoleKey || adminEmails.length === 0) {
+  if (!url || !publishableKey || !serviceRoleKey) {
     return {
       authorized: false,
       response: Response.json(
-        { error: "Falta configurar la clave secreta de servidor o el correo administrador en el entorno." },
+        { error: "Falta configurar Supabase en el entorno del servidor (URL, clave publicable y clave secreta de servicio)." },
         { status: 503 },
       ),
     };
@@ -41,12 +37,31 @@ export async function authorizeScheduleAdmin(request: Request): Promise<Authoriz
     return { authorized: false, response: Response.json({ error: "Confirma tu correo antes de cargar horarios." }, { status: 403 }) };
   }
 
-  if (!data.user.email || !adminEmails.includes(data.user.email.toLocaleLowerCase("en-US"))) {
-    return { authorized: false, response: Response.json({ error: "Tu cuenta no está autorizada para publicar horarios." }, { status: 403 }) };
-  }
-
   const adminClient = createClient(url, serviceRoleKey, {
     auth: { autoRefreshToken: false, persistSession: false },
   });
+
+  const { data: adminRole, error: roleError } = await adminClient
+    .from("user_roles")
+    .select("id")
+    .eq("user_id", data.user.id)
+    .eq("role", "admin")
+    .eq("active", true)
+    .maybeSingle();
+
+  if (roleError) {
+    return {
+      authorized: false,
+      response: Response.json(
+        { error: "No se pudo verificar los permisos de administrador. Ejecuta la migración de roles en Supabase e intenta de nuevo." },
+        { status: 503 },
+      ),
+    };
+  }
+
+  if (!adminRole) {
+    return { authorized: false, response: Response.json({ error: "Tu cuenta no está autorizada para publicar horarios." }, { status: 403 }) };
+  }
+
   return { authorized: true, user: data.user, adminClient };
 }
