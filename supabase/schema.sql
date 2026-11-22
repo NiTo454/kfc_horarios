@@ -150,3 +150,27 @@ $$;
 
 revoke all on function public.publish_schedule(text, date, date, text, text, uuid, jsonb) from public, anon, authenticated;
 grant execute on function public.publish_schedule(text, date, date, text, text, uuid, jsonb) to service_role;
+
+create table if not exists public.user_roles (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users (id) on delete cascade,
+  role text not null check (role in ('admin')),
+  active boolean not null default true,
+  granted_by uuid references auth.users (id) on delete set null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique (user_id, role)
+);
+
+create index if not exists user_roles_user_id_idx on public.user_roles (user_id);
+create index if not exists user_roles_role_active_idx on public.user_roles (role, active);
+
+alter table public.user_roles enable row level security;
+
+drop policy if exists "Users can view their own roles" on public.user_roles;
+create policy "Users can view their own roles"
+  on public.user_roles for select to authenticated
+  using (auth.uid() = user_id);
+
+grant select on public.user_roles to authenticated;
+grant select, insert, update, delete on public.user_roles to service_role;
