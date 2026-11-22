@@ -1,4 +1,18 @@
-import { getDocument } from "pdfjs-dist/legacy/build/pdf.mjs";
+import { getDocument, GlobalWorkerOptions } from "pdfjs-dist/legacy/build/pdf.mjs";
+
+// Vercel/serverless: avoid fake-worker module resolution failures by pinning the bundled worker path.
+if (typeof window === "undefined") {
+  try {
+    const { pathToFileURL } = await import("node:url");
+    const { createRequire } = await import("node:module");
+    const require = createRequire(import.meta.url);
+    GlobalWorkerOptions.workerSrc = pathToFileURL(
+      require.resolve("pdfjs-dist/legacy/build/pdf.worker.mjs"),
+    ).toString();
+  } catch {
+    // Fall back to pdfjs-dist defaults (e.g. if resolution is unavailable in this runtime).
+  }
+}
 
 export type ParsedShift = {
   workDate: string;
