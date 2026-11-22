@@ -36,6 +36,15 @@ type ScheduleRequestResponse = {
   weekEndDate?: string;
   cleanupWarning?: string;
 };
+type AdminRole = {
+  id: string;
+  userId: string;
+  email: string | null;
+  active: boolean;
+  grantedBy: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
 
 function Icon({ name, size = 18 }: { name: IconName; size?: number }) {
   const paths: Record<IconName, React.ReactNode> = {
@@ -244,6 +253,15 @@ export default function Home() {
   const [scheduleLoading, setScheduleLoading] = useState(false);
   const [scheduleError, setScheduleError] = useState("");
   const [scheduleRefresh, setScheduleRefresh] = useState(0);
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [adminCurrentUserId, setAdminCurrentUserId] = useState<string | null>(null);
+  const [showAdminPanel, setShowAdminPanel] = useState(false);
+  const [adminRoles, setAdminRoles] = useState<AdminRole[]>([]);
+  const [adminRolesLoading, setAdminRolesLoading] = useState(false);
+  const [adminRolesError, setAdminRolesError] = useState("");
+  const [adminRolesNotice, setAdminRolesNotice] = useState("");
+  const [adminEmailInput, setAdminEmailInput] = useState("");
+  const [adminActionBusy, setAdminActionBusy] = useState(false);
   const savedName = useSyncExternalStore(subscribeToSavedName, getSavedName, () => null);
   const employee = savedName ? employees.find((person) => normalizeName(person.name) === normalizeName(savedName)) ?? null : null;
   const days = useMemo(() => getScheduleDays(schedule), [schedule]);
@@ -268,6 +286,13 @@ export default function Home() {
         setSchedule(null);
         setEmployees([]);
         setScheduleError("");
+        setIsAdmin(false);
+        setAdminCurrentUserId(null);
+        setAdminRoles([]);
+        setShowAdminPanel(false);
+        setAdminRolesError("");
+        setAdminRolesNotice("");
+        setAdminEmailInput("");
       }
     });
 
@@ -469,10 +494,127 @@ export default function Home() {
       setScheduleError("");
       setNameInput("");
       setOtherEmployee(null);
+      setIsAdmin(false);
+      setAdminCurrentUserId(null);
+      setAdminRoles([]);
+      setShowAdminPanel(false);
+      setAdminRolesError("");
+      setAdminRolesNotice("");
+      setAdminEmailInput("");
     } catch (error: unknown) {
       setAuthError(error instanceof Error ? error.message : "No se pudo cerrar la sesión.");
     }
   }
+
+
+  async function getAccessToken() {
+    if (!supabase) throw new Error("Supabase no est\u00e1 configurado.");
+    const { data, error } = await supabase.auth.getSession();
+    if (error) throw error;
+    if (!data.session) throw new Error("Tu sesi\u00f3n expir\u00f3. Inicia sesi\u00f3n de nuevo.");
+    return data.session.access_token;
+  }
+
+  async function loadAdminRoles(showLoading = true) {
+    if (!supabase || !sessionUserId) {
+      setIsAdmin(false);
+      setAdminCurrentUserId(null);
+      setAdminRoles([]);
+      return false;
+    }
+    if (showLoading) setAdminRolesLoading(true);
+    setAdminRolesError("");
+    try {
+      const token = await getAccessToken();
+      const response = await fetch("/api/admin/roles", {
+        headers: { Authorization: `Bearer ${token}` },
+        cache: "no-store",
+      });
+      if (response.status === 401 || response.status === 403) {
+        setIsAdmin(false);
+        setAdminCurrentUserId(null);
+        setAdminRoles([]);
+        return false;
+      }
+      const result = await response.json() as { error?: string; admins?: AdminRole[]; currentUserId?: string };
+      if (!response.ok) throw new Error(result.error ?? "No se pudieron cargar los permisos.");
+      setIsAdmin(true);
+      setAdminCurrentUserId(result.currentUserId ?? null);
+      setAdminRoles(result.admins ?? []);
+      return true;
+    } catch (error: unknown) {
+      setIsAdmin(false);
+      setAdminCurrentUserId(null);
+      setAdminRoles([]);
+      setAdminRolesError(error instanceof Error ? error.message : "No se pudieron cargar los permisos.");
+      return false;
+    } finally {
+      if (showLoading) setAdminRolesLoading(false);
+    }
+  }
+
+  async function handleGrantAdmin(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const email = adminEmailInput.trim();
+    if (!email) {
+      setAdminRolesError("Escribe el correo de la cuenta que recibir\u00e1 permisos de administrador.");
+      return;
+    }
+    setAdminActionBusy(true);
+    setAdminRolesError("");
+    setAdminRolesNotice("");
+    try {
+      const token = await getAccessToken();
+      const response = await fetch("/api/admin/roles", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ email }),
+      });
+      const result = await response.json() as { error?: string; email?: string };
+      if (!response.ok) throw new Error(result.error ?? "No se pudo otorgar el acceso.");
+      setAdminEmailInput("");
+      setAdminRolesNotice(`Acceso de administrador otorgado a ${result.email ?? email}.`);
+      await loadAdminRoles(false);
+    } catch (error: unknown) {
+      setAdminRolesError(error instanceof Error ? error.message : "No se pudo otorgar el acceso.");
+    } finally {
+      setAdminActionBusy(false);
+    }
+  }
+
+  async function handleRevokeAdmin(userId: string, email: string | null) {
+    if (!window.confirm(`\u00bfQuitar acceso de administrador a ${email ?? "esta cuenta"}?`)) return;
+    setAdminActionBusy(true);
+    setAdminRolesError("");
+    setAdminRolesNotice("");
+    try {
+      const token = await getAccessToken();
+      const response = await fetch(`/api/admin/roles?userId=${encodeURIComponent(userId)}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const result = await response.json() as { error?: string };
+      if (!response.ok) throw new Error(result.error ?? "No se pudo revocar el acceso.");
+      setAdminRolesNotice(`Acceso de administrador revocado para ${email ?? "la cuenta"}.`);
+      await loadAdminRoles(false);
+    } catch (error: unknown) {
+      setAdminRolesError(error instanceof Error ? error.message : "No se pudo revocar el acceso.");
+    } finally {
+      setAdminActionBusy(false);
+    }
+  }
+
+  useEffect(() => {
+    if (!sessionUserId) return;
+    const timer = window.setTimeout(() => {
+      void loadAdminRoles();
+    }, 0);
+    return () => window.clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sessionUserId]);
 
   function closeUploader() {
     setShowUploader(false);
@@ -617,12 +759,13 @@ export default function Home() {
         </nav>
 
         <div className="sidebar-bottom">
-          <div className="help-card">
+          {isAdmin && <div className="help-card">
             <span className="help-icon"><Icon name="calendar" size={17} /></span>
-            <strong>¿Un horario nuevo?</strong>
-            <p>La carga y extracción de PDF todavía está pendiente.</p>
+            <strong>Administración</strong>
+            <p>Publica horarios y gestiona quién tiene permisos de administrador.</p>
             <button type="button" className="help-action" onClick={() => { setShowUploader(true); setUploadNotice(""); }}>Cargar PDF <Icon name="arrow" size={14} /></button>
-          </div>
+            <button type="button" className="help-action" onClick={() => { setShowAdminPanel(true); setAdminRolesError(""); setAdminRolesNotice(""); void loadAdminRoles(); }}>Administrar permisos <Icon name="arrow" size={14} /></button>
+          </div>}
           <a className="nav-link settings-link" href="#configuracion"><Icon name="settings" /> Configuración</a>
           <div className="profile">
             <div className="profile-avatar">{getInitials(session.user.email ?? "U")}</div>
@@ -649,7 +792,10 @@ export default function Home() {
               <h1>Horario semanal</h1>
               <p className="subtitle">Consulta los turnos de tu equipo en un solo lugar.</p>
             </div>
-            <button className="primary-button" type="button" onClick={() => { setShowUploader(true); setUploadNotice(""); }}><Icon name="upload" size={17} /> Cargar horario PDF</button>
+            {isAdmin && <div className="intro-actions">
+              <button className="primary-button" type="button" onClick={() => { setShowUploader(true); setUploadNotice(""); }}><Icon name="upload" size={17} /> Cargar horario PDF</button>
+              <button className="primary-button" type="button" onClick={() => { setShowAdminPanel(true); setAdminRolesError(""); setAdminRolesNotice(""); void loadAdminRoles(); }}><Icon name="settings" size={17} /> Administrar permisos</button>
+            </div>}
           </div>
 
           {scheduleError && <p className="auth-feedback auth-feedback-error" role="alert">No se pudieron cargar los datos de Supabase: {scheduleError}</p>}
@@ -734,6 +880,16 @@ export default function Home() {
             <h1>{savedName ? `Hola, ${savedName.split(" ")[0]}` : "Encuentra tu horario"}</h1>
             <p className="mobile-subtitle">Consulta tus turnos sin abrir el PDF.</p>
 
+            {isAdmin && <section className="mobile-search-card" id="mobile-admin">
+              <span className="search-card-icon"><Icon name="settings" size={17} /></span>
+              <h2>Administración</h2>
+              <p>Publica horarios y gestiona los permisos de administrador.</p>
+              <div className="modal-actions">
+                <button type="button" className="primary-button" onClick={() => { setShowUploader(true); setUploadNotice(""); }}><Icon name="upload" size={16} /> Cargar horario PDF</button>
+                <button type="button" className="primary-button" onClick={() => { setShowAdminPanel(true); setAdminRolesError(""); setAdminRolesNotice(""); void loadAdminRoles(); }}><Icon name="settings" size={16} /> Permisos</button>
+              </div>
+            </section>}
+
             {savedName ? (
               <>
                 <section className="mobile-week-card">
@@ -768,9 +924,78 @@ export default function Home() {
               </section>
             )}
           </div>
-          <nav className="mobile-tab-bar" aria-label="Navegación"><button type="button" className="mobile-tab active" onClick={() => document.getElementById("mobile-my-schedule")?.scrollIntoView({ behavior: "smooth" })}><Icon name="calendar" size={18} />Mi horario</button><button type="button" className="mobile-tab" onClick={() => document.getElementById("mobile-other-search")?.scrollIntoView({ behavior: "smooth" })}><Icon name="search" size={18} />Buscar persona</button></nav>
+          <nav className="mobile-tab-bar" aria-label="Navegación">
+            <button type="button" className="mobile-tab active" onClick={() => document.getElementById("mobile-my-schedule")?.scrollIntoView({ behavior: "smooth" })}><Icon name="calendar" size={18} />Mi horario</button>
+            <button type="button" className="mobile-tab" onClick={() => document.getElementById("mobile-other-search")?.scrollIntoView({ behavior: "smooth" })}><Icon name="search" size={18} />Buscar persona</button>
+            {isAdmin && <button type="button" className="mobile-tab" onClick={() => document.getElementById("mobile-admin")?.scrollIntoView({ behavior: "smooth" })}><Icon name="settings" size={18} />Admin</button>}
+          </nav>
         </div>
       </section>
+
+
+      {showAdminPanel && <div className="modal-backdrop">
+        <section className="upload-modal" role="dialog" aria-modal="true" aria-labelledby="admin-roles-title">
+          <button type="button" className="modal-close" aria-label="Cerrar" disabled={adminActionBusy} onClick={() => setShowAdminPanel(false)}><Icon name="close" size={18} /></button>
+          <span className="modal-icon"><Icon name="settings" size={21} /></span>
+          <h2 id="admin-roles-title">Administrar permisos</h2>
+          <p>Otorga o revoca el acceso de administrador. Solo las cuentas con rol activo pueden publicar horarios y gestionar permisos.</p>
+
+          <form className="auth-form" onSubmit={handleGrantAdmin}>
+            <label className="auth-field">
+              <span>Correo de la cuenta</span>
+              <span className="auth-input-wrap">
+                <Icon name="mail" size={17} />
+                <input
+                  type="email"
+                  value={adminEmailInput}
+                  onChange={(event) => setAdminEmailInput(event.target.value)}
+                  placeholder="correo@ejemplo.com"
+                  autoComplete="email"
+                  required
+                  disabled={adminActionBusy}
+                />
+              </span>
+            </label>
+            <div className="modal-actions">
+              <button type="button" className="cancel-button" disabled={adminActionBusy} onClick={() => void loadAdminRoles()}>{adminRolesLoading ? "Actualizando\u2026" : "Actualizar lista"}</button>
+              <button type="submit" className="primary-button" disabled={adminActionBusy || !adminEmailInput.trim()}>{adminActionBusy ? "Guardando\u2026" : "Otorgar acceso"}</button>
+            </div>
+          </form>
+
+          {adminRolesError && <p className="upload-error" role="alert">{adminRolesError}</p>}
+          {adminRolesNotice && <p className="auth-feedback auth-feedback-success" role="status">{adminRolesNotice}</p>}
+
+          <div className="schedule-preview">
+            <div className="preview-summary">
+              <strong>Administradores activos</strong>
+              <span>{adminRolesLoading ? "Cargando permisos\u2026" : `${adminRoles.length} cuenta(s) con acceso`}</span>
+            </div>
+            <div className="preview-table-wrap">
+              <table className="preview-table">
+                <thead><tr><th>CORREO</th><th>ESTADO</th><th>ACCI\u00d3N</th></tr></thead>
+                <tbody>
+                  {!adminRolesLoading && adminRoles.map((admin) => (
+                    <tr key={admin.userId}>
+                      <td>{admin.email ?? admin.userId}{admin.userId === adminCurrentUserId ? " (tu cuenta)" : ""}</td>
+                      <td>{admin.active ? "Activo" : "Inactivo"}</td>
+                      <td>
+                        {admin.userId === adminCurrentUserId
+                          ? <span>???</span>
+                          : <button type="button" className="cancel-button" disabled={adminActionBusy} onClick={() => void handleRevokeAdmin(admin.userId, admin.email)}>Revocar</button>}
+                      </td>
+                    </tr>
+                  ))}
+                  {!adminRolesLoading && adminRoles.length === 0 && <tr><td colSpan={3}>No hay administradores activos registrados.</td></tr>}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div className="modal-actions">
+            <button type="button" className="cancel-button" disabled={adminActionBusy} onClick={() => setShowAdminPanel(false)}>Cerrar</button>
+          </div>
+        </section>
+      </div>}
 
       {showUploader && <div className="modal-backdrop">
         <section className="upload-modal" role="dialog" aria-modal="true" aria-labelledby="upload-title">
